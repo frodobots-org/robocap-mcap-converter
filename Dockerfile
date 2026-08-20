@@ -2,8 +2,13 @@ FROM ghcr.io/astral-sh/uv:0.8.17 AS uv
 
 FROM python:3.12-slim-bookworm
 
+ARG VERSION=0.2.0
+ARG REVISION=unknown
+
 LABEL org.opencontainers.image.title="RoboCap MCAP Converter" \
       org.opencontainers.image.description="Open-source raw RoboCap session to Foxglove MCAP converter" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.vendor="FrodoBots" \
       org.opencontainers.image.source="https://github.com/frodobots-org/robocap-mcap-converter"
 
