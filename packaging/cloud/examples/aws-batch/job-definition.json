@@ -8,7 +8,7 @@
     "video_workers": "4"
   },
   "containerProperties": {
-    "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/robocap-mcap-converter:0.2.0",
+    "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/robocap-mcap-converter:0.2.1",
     "jobRoleArn": "arn:aws:iam::ACCOUNT_ID:role/robocap-mcap-batch-job",
     "command": [
       "s3",

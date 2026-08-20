@@ -58,7 +58,7 @@ Each MP4 must contain a numeric `format.tags.comment` value holding its
 ## Docker Quick Start
 
 ```bash
-docker pull bitrobot/robocap-mcap-converter:0.2.0
+docker pull bitrobot/robocap-mcap-converter:0.2.1
 mkdir -p sessions output
 # The container runs as non-root UID/GID 10001.
 sudo chown 10001:10001 output
@@ -66,7 +66,7 @@ sudo chown 10001:10001 output
 docker run --rm \
   -v "$PWD/sessions:/work/sessions:ro" \
   -v "$PWD/output:/work/output" \
-  bitrobot/robocap-mcap-converter:0.2.0 \
+  bitrobot/robocap-mcap-converter:0.2.1 \
   local /work/sessions/75cd2758f7384110_20260720_034459_session6 \
   --output-dir /work/output
 ```
@@ -102,7 +102,7 @@ Outputs are written under `SESSION/mcap/` using:
 The container uses the standard AWS credential chain. Prefer workload roles:
 
 ```bash
-docker run --rm bitrobot/robocap-mcap-converter:0.2.0 \
+docker run --rm bitrobot/robocap-mcap-converter:0.2.1 \
   s3 \
   --input-uri s3://customer-raw/session/20260720_034459_session6/ \
   --output-uri s3://customer-derived/mcap/job-001/ \

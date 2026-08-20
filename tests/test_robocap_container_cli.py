@@ -13,7 +13,7 @@ def test_container_cli_dispatches_s3(monkeypatch):
 
 def test_container_cli_version(capsys):
     assert container_cli.main(["version"]) == 0
-    assert capsys.readouterr().out.strip() == "0.2.0"
+    assert capsys.readouterr().out.strip() == "0.2.1"
 
 
 def test_container_cli_rejects_unknown_command(capsys):

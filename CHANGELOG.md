@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 - 2026-08-20
+
+- Added the EGL runtime dependency to headless GUI CI verification.
+
 ## 0.2.0 - 2026-08-20
 
 - Initial open-source release.
