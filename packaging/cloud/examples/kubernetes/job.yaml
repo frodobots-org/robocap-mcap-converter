@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: robocap-mcap-session
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: robocap-mcap-converter
+    spec:
+      restartPolicy: Never
+      serviceAccountName: robocap-mcap-converter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: converter
+          image: REGISTRY/robocap-mcap-converter:0.2.0
+          args:
+            - s3
+            - --input-uri
+            - s3://CUSTOMER_RAW_BUCKET/session/YYYYMMDD_HHMMSS_sessionN/
+            - --output-uri
+            - s3://CUSTOMER_OUTPUT_BUCKET/mcap/JOB_ID/
+            - --video-workers
+            - "4"
+            - --json
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+          resources:
+            requests:
+              cpu: "8"
+              memory: 16Gi
+              ephemeral-storage: 50Gi
+            limits:
+              cpu: "8"
+              memory: 30Gi
+              ephemeral-storage: 100Gi
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 100Gi

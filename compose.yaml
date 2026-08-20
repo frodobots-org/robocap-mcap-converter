@@ -1,0 +1,11 @@
+services:
+  converter:
+    build: .
+    volumes:
+      - ./sessions:/work/sessions:ro
+      - ./output:/work/output
+    command:
+      - local
+      - /work/sessions/75cd2758f7384110_20260720_034459_session6
+      - --output-dir
+      - /work/output

@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package robocap;
+
+import "google/protobuf/timestamp.proto";
+
+// Minimal IMU sample message for RoboCap MCAP exports.
+// Mirrors the field set of sensor_msgs/Imu without the orientation
+// covariance machinery — RoboCap doesn't currently produce fused
+// orientation, only raw accel + gyro.
+message IMU {
+  // Timestamp of the sample in the parent frame's clock.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference (e.g. "imu_dev2").
+  string frame_id = 2;
+
+  // Linear acceleration in m/s^2, x/y/z in the IMU's own coordinate frame.
+  double accel_x = 3;
+  double accel_y = 4;
+  double accel_z = 5;
+
+  // Angular velocity in rad/s, x/y/z in the IMU's own coordinate frame.
+  double gyro_x = 6;
+  double gyro_y = 7;
+  double gyro_z = 8;
+}

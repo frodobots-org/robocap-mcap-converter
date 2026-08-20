@@ -1,0 +1,15 @@
+RoboCap to MCAP Cloud Converter - Third-Party Notices
+
+This product contains third-party software. The container's package inventory and
+license files are included in the handoff bundle under inventory/. Recipients must
+review those licenses together with their governing commercial agreement.
+
+FFmpeg
+------
+The runtime image installs FFmpeg from Debian 12. Debian's FFmpeg build is licensed
+under the GNU General Public License version 2 or later because GPL components are
+enabled. Source and license information are available from:
+https://packages.debian.org/bookworm/ffmpeg
+https://ffmpeg.org/legal.html
+
+No ownership rights in third-party software are transferred by this notice.

@@ -1,0 +1,41 @@
+{
+  "jobDefinitionName": "robocap-mcap-converter-0-1-0",
+  "type": "container",
+  "platformCapabilities": ["EC2"],
+  "parameters": {
+    "input_uri": "s3://CUSTOMER_RAW_BUCKET/session/YYYYMMDD_HHMMSS_sessionN/",
+    "output_uri": "s3://CUSTOMER_OUTPUT_BUCKET/mcap/JOB_ID/",
+    "video_workers": "4"
+  },
+  "containerProperties": {
+    "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/robocap-mcap-converter:0.2.0",
+    "jobRoleArn": "arn:aws:iam::ACCOUNT_ID:role/robocap-mcap-batch-job",
+    "command": [
+      "s3",
+      "--input-uri", "Ref::input_uri",
+      "--output-uri", "Ref::output_uri",
+      "--video-workers", "Ref::video_workers",
+      "--json"
+    ],
+    "resourceRequirements": [
+      {"type": "VCPU", "value": "8"},
+      {"type": "MEMORY", "value": "30000"}
+    ],
+    "linuxParameters": {
+      "initProcessEnabled": true
+    },
+    "readonlyRootFilesystem": false
+  },
+  "retryStrategy": {
+    "attempts": 2,
+    "evaluateOnExit": [
+      {"onExitCode": "2", "action": "EXIT"},
+      {"onReason": "Host EC2*", "action": "RETRY"},
+      {"onReason": "*", "action": "EXIT"}
+    ]
+  },
+  "timeout": {
+    "attemptDurationSeconds": 14400
+  },
+  "propagateTags": true
+}
