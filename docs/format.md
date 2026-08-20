@@ -16,6 +16,3 @@ session_start_utc + MP4 format.tags.comment device_clock_us + packet DTS
 
 IMU samples use their device-clock nanosecond timestamp with the same session
 UTC base. The converter validates temporal overlap before writing.
-
-No real calibration parameters, `/tf-static`, annotations, face-blur outputs,
-or cloud-delivery metadata are included.

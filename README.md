@@ -20,18 +20,6 @@ segment.
 - Windows drag-and-drop app, local CLI, Docker, S3, AWS Batch, and Kubernetes
 - No database, FrodoBots service, telemetry, or inbound network listener
 
-## Calibration and Privacy
-
-This project contains **no device-specific calibration data**. It does not
-load or emit real camera intrinsics, distortion coefficients, extrinsics,
-calibration URIs, or `/tf-static`. Camera-info topics contain explicitly
-generic placeholders for viewer compatibility, and embedded metadata marks
-calibration as absent.
-
-The converter does not blur faces. Camera streams are embedded unchanged
-unless a viewer-compatibility normalization pass is required. Embedded
-metadata identifies the footage as raw and unblurred.
-
 ## Input Layout
 
 Drop or mount a timestamped session directory:

@@ -11,4 +11,3 @@
 - Added six-camera and optional wrist-camera discovery.
 - Added MP4/IMU validation, timing checks, viewer-safe normalization, and MCAP QA.
 - Added unique device/session/segment output filenames.
-- Explicitly excluded device-specific calibration data and transforms.
