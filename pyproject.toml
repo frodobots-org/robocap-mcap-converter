@@ -1,7 +1,7 @@
 [project]
 name = "robocap-mcap-converter"
 version = "0.2.1"
-description = "Validate and convert raw RoboCap camera and IMU sessions to Foxglove MCAP"
+description = "Validate and convert raw RoboCap camera and IMU sessions to MCAP"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"

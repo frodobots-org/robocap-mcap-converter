@@ -1,19 +1,19 @@
 # RoboCap MCAP Converter
 
 Open-source tools for validating and converting raw RoboCap and RoboWrist
-recordings into self-contained [Foxglove MCAP](https://mcap.dev/) files.
+recordings into self-contained [MCAP](https://mcap.dev/) files.
 
 The converter accepts synchronized camera MP4s and IMU SQLite databases from
 one recording session. It validates filenames, required streams, clock tags,
-timing overlap, video codecs, and IMU integrity, then writes one MCAP per
-segment.
+timestamp synchronization, video codecs, and IMU integrity, then writes one
+MCAP per segment.
 
 ## Features
 
 - Six RoboCap cameras, with two optional RoboWrist cameras
 - Required head IMUs and optional wrist IMUs
 - MP4 `comment` clock anchoring and preserved per-camera offsets
-- H.264/H.265 Annex-B payloads for Foxglove playback
+- H.264/H.265 Annex-B payloads for compatible playback
 - Automatic B-frame and incompatible SPS normalization
 - IMU conversion to SI units with gyro interpolation
 - Automatic structural, timing, and post-write MCAP validation
