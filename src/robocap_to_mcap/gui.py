@@ -30,10 +30,10 @@ from PySide6.QtWidgets import (
 )
 
 from .conversion import convert_segment
-from .models import ConversionResult, SegmentInput, SessionInput, Severity
+from .models import CheckResult, ConversionResult, SegmentInput, SessionInput, Severity
 from .reporting import text_report
 from .runtime import configure_bundled_tools
-from .scanner import normalize_robocap_id, scan_session
+from .scanner import discover_session_roots, normalize_robocap_id, scan_session
 from .validator import validate_session_deep
 
 
@@ -79,6 +79,20 @@ def _display_status(
     return "Ready"
 
 
+def _result_key(session: SessionInput, segment: SegmentInput | int) -> tuple[str, int]:
+    number = segment if isinstance(segment, int) else segment.number
+    return str(session.root), number
+
+
+def _requires_validation(segment: SegmentInput) -> bool:
+    if segment.validated_fingerprint is None:
+        return True
+    try:
+        return segment.validated_fingerprint != segment.fingerprint()
+    except OSError:
+        return True
+
+
 class DropZone(QWidget):
     dropped = Signal(list)
 
@@ -89,10 +103,10 @@ class DropZone(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(5)
-        title = QLabel("Drop a RoboCap session folder here")
+        title = QLabel("Drop session folders or a parent folder here")
         title.setObjectName("dropTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint = QLabel("One verified MCAP will be written for each valid segment")
+        hint = QLabel("Sessions are discovered, validated, and converted as one batch")
         hint.setObjectName("dropHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -122,23 +136,43 @@ class DropZone(QWidget):
 
 
 class ValidationWorker(QObject):
-    segment_ready = Signal(int)
+    segment_ready = Signal(object, int, int, int)
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, session: SessionInput, cancel: threading.Event) -> None:
+    def __init__(self, sessions: list[SessionInput], cancel: threading.Event) -> None:
         super().__init__()
-        self.session = session
+        self.sessions = sessions
         self.cancel = cancel
 
     def run(self) -> None:
         try:
-            validate_session_deep(
-                self.session,
-                cancel=self.cancel.is_set,
-                on_segment=lambda segment: self.segment_ready.emit(segment.number),
-            )
-            self.finished.emit(self.session)
+            total = sum(len(session.segments) for session in self.sessions)
+            completed = 0
+            for session in self.sessions:
+                if self.cancel.is_set():
+                    break
+
+                def on_segment(segment: SegmentInput) -> None:
+                    nonlocal completed
+                    completed += 1
+                    self.segment_ready.emit(session, segment.number, completed, total)
+
+                try:
+                    validate_session_deep(
+                        session,
+                        cancel=self.cancel.is_set,
+                        on_segment=on_segment,
+                    )
+                except Exception as exc:
+                    session.checks.append(CheckResult(
+                        "batch.validation.failed",
+                        Severity.ERROR,
+                        f"This session could not be validated: {type(exc).__name__}: {exc}",
+                        "Enable Debug mode, inspect this session, and retry it separately.",
+                        (str(session.root),),
+                    ))
+            self.finished.emit(self.sessions)
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -150,26 +184,38 @@ class ConversionWorker(QObject):
 
     def __init__(
         self,
-        session: SessionInput,
-        segments: list[SegmentInput],
+        jobs: list[tuple[SessionInput, SegmentInput]],
         debug: bool,
         cancel: threading.Event,
     ) -> None:
         super().__init__()
-        self.session = session
-        self.segments = segments
+        self.jobs = jobs
         self.debug = debug
         self.cancel = cancel
 
     def run(self) -> None:
-        results: list[ConversionResult] = []
+        results: list[tuple[SessionInput, ConversionResult]] = []
         try:
-            for index, segment in enumerate(self.segments, start=1):
+            for index, (session, segment) in enumerate(self.jobs, start=1):
                 if self.cancel.is_set():
                     break
-                result = convert_segment(self.session, segment, debug=self.debug)
-                results.append(result)
-                self.progress.emit(index, len(self.segments), result)
+                try:
+                    result = convert_segment(session, segment, debug=self.debug)
+                except Exception as exc:
+                    result = ConversionResult(
+                        segment=segment.number,
+                        output_path=session.root / "mcap" / f"segment{segment.number}.mcap.invalid",
+                        success=False,
+                        checks=(CheckResult(
+                            "batch.conversion.failed",
+                            Severity.ERROR,
+                            f"This segment could not be converted: {type(exc).__name__}: {exc}",
+                            "Enable Debug mode, inspect this session, and retry it separately.",
+                            (str(session.root),),
+                        ),),
+                    )
+                results.append((session, result))
+                self.progress.emit(index, len(self.jobs), (session, result))
             self.finished.emit(results)
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
@@ -180,8 +226,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("RoboCap to MCAP")
         self.resize(1040, 760)
-        self.session: SessionInput | None = None
-        self.results: dict[int, ConversionResult] = {}
+        self.sessions: list[SessionInput] = []
+        self.results: dict[tuple[str, int], ConversionResult] = {}
+        self.row_inputs: dict[tuple[str, int], tuple[SessionInput, SegmentInput]] = {}
         self.thread: QThread | None = None
         self.worker: QObject | None = None
         self.cancel_event = threading.Event()
@@ -189,6 +236,15 @@ class MainWindow(QMainWindow):
         self.debug_mode = False
         self.video_workers = min(4, os.cpu_count() or 1)
         self._build_ui()
+
+    @property
+    def session(self) -> SessionInput | None:
+        """Compatibility accessor for callers loading one session."""
+        return self.sessions[0] if self.sessions else None
+
+    @session.setter
+    def session(self, value: SessionInput | None) -> None:
+        self.sessions = [value] if value is not None else []
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -200,7 +256,7 @@ class MainWindow(QMainWindow):
         heading = QVBoxLayout()
         title = QLabel("RoboCap to MCAP")
         title.setObjectName("title")
-        subtitle = QLabel("Raw session validation and time-synchronized Foxglove export")
+        subtitle = QLabel("Bulk raw-session validation and timestamp-synchronized MCAP export")
         subtitle.setObjectName("subtitle")
         heading.addWidget(title)
         heading.addWidget(subtitle)
@@ -222,15 +278,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.drop_zone)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(("Segment", "Cameras", "IMUs", "Duration", "Status", "Output"))
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ("Session", "Segment", "Cameras", "IMUs", "Duration", "Status", "Output")
+        )
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.itemSelectionChanged.connect(self._show_selected_details)
         self.details = QTextBrowser()
-        self.details.setHtml("<b>No session loaded.</b><br>Drop a timestamped recording folder to begin.")
+        self.details.setHtml(
+            "<b>No sessions loaded.</b><br>Drop session folders or a parent folder to begin."
+        )
         self.details.setVisible(False)
         self.details.setOpenLinks(False)
         self.details.anchorClicked.connect(self._reveal_output)
@@ -244,7 +304,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress)
 
         bottom = QHBoxLayout()
-        self.summary = QLabel("Waiting for a session folder")
+        self.summary = QLabel("Waiting for session folders")
         bottom.addWidget(self.summary, 1)
         self.copy_button = QPushButton("Copy report")
         self.copy_button.setObjectName("secondary")
@@ -285,7 +345,7 @@ class MainWindow(QMainWindow):
         self.debug_mode = enabled
         self.details.setVisible(enabled)
         self.copy_button.setVisible(enabled)
-        self.copy_button.setEnabled(enabled and self.session is not None)
+        self.copy_button.setEnabled(enabled and bool(self.sessions))
         if enabled:
             if self.table.rowCount() and not self.table.selectedItems():
                 self.table.selectRow(0)
@@ -301,93 +361,145 @@ class MainWindow(QMainWindow):
 
     def _handle_drop(self, paths: list[Path]) -> None:
         folders = [path for path in paths if path.is_dir()]
-        selected_files: list[Path] | None = None
-        if folders:
-            root = folders[0]
-        else:
-            parents = {path.parent.resolve() for path in paths if path.is_file()}
-            if len(parents) != 1:
-                QMessageBox.warning(self, "One session required", "Drop one folder, or files from one folder.")
-                return
-            root = parents.pop()
-            selected_files = [path for path in paths if path.is_file()]
-        try:
-            session = scan_session(root, input_paths=selected_files)
-        except Exception as exc:
-            QMessageBox.critical(self, "Cannot scan folder", str(exc))
+        files = [path.resolve() for path in paths if path.is_file()]
+        roots = discover_session_roots(paths)
+        if not roots:
+            QMessageBox.warning(
+                self,
+                "No sessions found",
+                "No supported RoboCap session files were found in the dropped paths.",
+            )
             return
+
+        sessions: list[SessionInput] = []
+        for root in roots:
+            selected_files = None
+            if not folders and files:
+                selected_files = [path for path in files if path.is_relative_to(root)]
+            try:
+                session = self._scan_session_with_prompts(root, selected_files)
+            except Exception as exc:
+                QMessageBox.critical(self, "Cannot scan folder", f"{root}\n\n{exc}")
+                continue
+            sessions.append(session)
+        if not sessions:
+            return
+
+        self.sessions = sessions
+        self.results.clear()
+        self.recheck_button.setEnabled(True)
+        self.copy_button.setEnabled(self.debug_mode)
+        self._refresh_table()
+        total = sum(len(session.segments) for session in sessions)
+        if self.deep_on_drop:
+            self._start_validation()
+        else:
+            self._update_summary(
+                f"Found {len(sessions)} session(s) and {total} segment(s); "
+                "deep checks will run before conversion."
+            )
+
+    def _scan_session_with_prompts(
+        self,
+        root: Path,
+        selected_files: list[Path] | None,
+    ) -> SessionInput:
+        session = scan_session(root, input_paths=selected_files)
         session_start = session.session_start
         robocap_id = session.robocap_id
         if session_start is None:
             value, ok = QInputDialog.getText(
                 self, "Session UTC timestamp",
-                "Folder name has no timestamp. Enter UTC as YYYY-MM-DDTHH:MM:SSZ:",
+                f"{root.name} has no timestamp. Enter UTC as YYYY-MM-DDTHH:MM:SSZ:",
             )
             if not ok:
-                return
+                return session
             try:
                 session_start = _parse_timestamp(value)
             except ValueError as exc:
                 QMessageBox.warning(self, "Invalid timestamp", str(exc))
-                return
+                return session
         if robocap_id is None:
             value, ok = QInputDialog.getText(
                 self,
                 "RoboCap device ID",
-                "Enter the RoboCap device ID for this recording:",
+                f"Enter the RoboCap device ID for {root.name}:",
             )
             if not ok:
-                return
+                return session
             try:
                 robocap_id = normalize_robocap_id(value)
             except ValueError as exc:
                 QMessageBox.warning(self, "Invalid RoboCap ID", str(exc))
-                return
-        session = scan_session(
+                return session
+        return scan_session(
             root,
             session_start=session_start,
             robocap_id=robocap_id,
             input_paths=selected_files,
         )
-        self.session = session
-        self.results.clear()
-        self.recheck_button.setEnabled(True)
-        self.copy_button.setEnabled(self.debug_mode)
-        self._refresh_table()
-        if self.deep_on_drop:
-            self._start_validation()
-        else:
-            self._update_summary("Structural scan complete; deep checks will run before conversion.")
 
     def _refresh_table(self) -> None:
-        if self.session is None:
+        if not self.sessions:
             return
-        self.table.setRowCount(len(self.session.segments))
-        for row, segment in enumerate(self.session.segments):
-            result = self.results.get(segment.number)
-            duration = f"{segment.duration_seconds:.1f}s" if segment.duration_seconds is not None else "Checking..."
-            status = _display_status(segment, result)
-            output = str(result.output_path) if result else ""
+        selected_key = None
+        if self.table.selectedItems():
+            selected_key = self.table.selectedItems()[0].data(Qt.ItemDataRole.UserRole)
+        rows = [
+            (session, segment)
+            for session in self.sessions
+            for segment in session.segments
+        ]
+        self.row_inputs.clear()
+        self.table.setRowCount(len(rows))
+        selected_row = None
+        for row, (session, segment) in enumerate(rows):
+            key = _result_key(session, segment)
+            self.row_inputs[key] = (session, segment)
+            result = self.results.get(key)
+            duration = (
+                f"{segment.duration_seconds:.1f}s"
+                if segment.duration_seconds is not None
+                else "Checking..."
+            )
             values = (
-                str(segment.number), str(len(segment.videos)), str(len(segment.imus)),
-                duration, status, output,
+                session.root.name,
+                str(segment.number),
+                str(len(segment.videos)),
+                str(len(segment.imus)),
+                duration,
+                _display_status(segment, result),
+                str(result.output_path) if result else "",
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setData(Qt.ItemDataRole.UserRole, segment.number)
+                item.setData(Qt.ItemDataRole.UserRole, key)
+                if column == 0:
+                    item.setToolTip(str(session.root))
                 self.table.setItem(row, column, item)
+            if key == selected_key:
+                selected_row = row
+        if selected_row is not None:
+            self.table.selectRow(selected_row)
         self._update_buttons()
 
     def _start_validation(self) -> None:
-        if self.session is None or self.thread is not None:
+        if not self.sessions or self.thread is not None:
             return
         self.cancel_event = threading.Event()
-        self._set_busy(True, "Running deep file and synchronization checks...")
-        worker = ValidationWorker(self.session, self.cancel_event)
+        total = sum(len(session.segments) for session in self.sessions)
+        self.progress.setRange(0, total)
+        self.progress.setValue(0)
+        self.progress.setVisible(True)
+        self._set_busy(
+            True,
+            f"Validating {total} segment(s) across {len(self.sessions)} session(s)...",
+        )
+        worker = ValidationWorker(self.sessions, self.cancel_event)
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.segment_ready.connect(lambda _number: self._refresh_table())
+        worker.segment_ready.connect(self._validation_progress)
         worker.finished.connect(self._validation_finished)
         worker.failed.connect(self._worker_failed)
         worker.finished.connect(thread.quit)
@@ -398,28 +510,58 @@ class MainWindow(QMainWindow):
         self.worker = worker
         thread.start()
 
-    def _validation_finished(self, _session: SessionInput) -> None:
+    def _validation_progress(
+        self,
+        _session: SessionInput,
+        _number: int,
+        completed: int,
+        total: int,
+    ) -> None:
+        self.progress.setValue(completed)
         self._refresh_table()
-        ready = sum(segment.is_ready for segment in self.session.segments) if self.session else 0
-        total = len(self.session.segments) if self.session else 0
-        self._set_busy(False, f"{ready} of {total} segments ready")
+        self._update_summary(f"Validated {completed} of {total} segments")
+
+    def _validation_finished(self, _sessions: list[SessionInput]) -> None:
+        self._refresh_table()
+        segments = [segment for session in self.sessions for segment in session.segments]
+        ready = sum(segment.is_ready for segment in segments)
+        self.progress.setVisible(False)
+        self._set_busy(
+            False,
+            f"{ready} of {len(segments)} segments ready across {len(self.sessions)} session(s)",
+        )
 
     def _start_conversion(self) -> None:
-        if self.session is None or self.thread is not None:
+        if not self.sessions or self.thread is not None:
             return
-        if any(segment.validated_fingerprint != segment.fingerprint() for segment in self.session.segments):
+        candidates = [
+            segment
+            for session in self.sessions
+            if not session.has_session_error
+            for segment in session.segments
+            if not segment.errors
+        ]
+        if any(_requires_validation(segment) for segment in candidates):
             self._start_validation()
             return
-        segments = [segment for segment in self.session.segments if segment.is_ready]
-        if not segments:
+        jobs = [
+            (session, segment)
+            for session in self.sessions
+            for segment in session.segments
+            if segment.is_ready
+        ]
+        if not jobs:
             return
         os.environ["ROBOCAP_CONVERT_VIDEO_WORKERS"] = str(self.video_workers)
         self.cancel_event = threading.Event()
-        self.progress.setRange(0, len(segments))
+        self.progress.setRange(0, len(jobs))
         self.progress.setValue(0)
         self.progress.setVisible(True)
-        self._set_busy(True, f"Converting {len(segments)} segment(s)...")
-        worker = ConversionWorker(self.session, segments, self.debug_mode, self.cancel_event)
+        self._set_busy(
+            True,
+            f"Converting {len(jobs)} segment(s) across {len(self.sessions)} session(s)...",
+        )
+        worker = ConversionWorker(jobs, self.debug_mode, self.cancel_event)
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -434,18 +576,36 @@ class MainWindow(QMainWindow):
         self.worker = worker
         thread.start()
 
-    def _conversion_progress(self, current: int, total: int, result: ConversionResult) -> None:
-        self.results[result.segment] = result
+    def _conversion_progress(
+        self,
+        current: int,
+        total: int,
+        payload: tuple[SessionInput, ConversionResult],
+    ) -> None:
+        session, result = payload
+        self.results[_result_key(session, result.segment)] = result
         self.progress.setValue(current)
         self._refresh_table()
         self._update_summary(f"Converted {current} of {total} segments")
 
-    def _conversion_finished(self, results: list[ConversionResult]) -> None:
-        for result in results:
-            self.results[result.segment] = result
-        succeeded = sum(result.success for result in results)
+    def _conversion_finished(
+        self,
+        results: list[tuple[SessionInput, ConversionResult]],
+    ) -> None:
+        for session, result in results:
+            self.results[_result_key(session, result.segment)] = result
+        succeeded = sum(result.success for _session, result in results)
+        failed = len(results) - succeeded
+        total_segments = sum(
+            len(session.segments) for session in self.sessions
+        )
+        skipped = total_segments - len(results)
         self._refresh_table()
-        self._set_busy(False, f"{succeeded} of {len(results)} conversions passed post-write QA")
+        self._set_busy(
+            False,
+            f"Batch complete: {succeeded} converted, {failed} failed, "
+            f"{skipped} skipped across {len(self.sessions)} session(s)",
+        )
         self.progress.setVisible(False)
 
     def _thread_finished(self) -> None:
@@ -466,36 +626,45 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool, message: str) -> None:
         self.cancel_button.setEnabled(busy)
-        self.recheck_button.setEnabled(not busy and self.session is not None)
+        self.recheck_button.setEnabled(not busy and bool(self.sessions))
         self.settings_button.setEnabled(not busy)
         self._update_summary(message)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        ready = bool(self.session and any(segment.is_ready for segment in self.session.segments))
-        self.convert_button.setEnabled(ready and self.thread is None)
-        self.copy_button.setEnabled(self.debug_mode and self.session is not None)
+        convertible = any(
+            segment.is_ready or not segment.errors
+            for session in self.sessions
+            if not session.has_session_error
+            for segment in session.segments
+        )
+        self.convert_button.setEnabled(convertible and self.thread is None)
+        self.copy_button.setEnabled(self.debug_mode and bool(self.sessions))
 
     def _update_summary(self, message: str) -> None:
         self.summary.setText(message)
 
-    def _selected_segment(self) -> SegmentInput | None:
-        if self.session is None or not self.table.selectedItems():
+    def _selected_segment(self) -> tuple[SessionInput, SegmentInput] | None:
+        if not self.sessions or not self.table.selectedItems():
             return None
-        number = self.table.selectedItems()[0].data(Qt.ItemDataRole.UserRole)
-        return next((segment for segment in self.session.segments if segment.number == number), None)
+        key = self.table.selectedItems()[0].data(Qt.ItemDataRole.UserRole)
+        return self.row_inputs.get(tuple(key))
 
     def _show_selected_details(self) -> None:
         if not self.debug_mode:
             return
-        segment = self._selected_segment()
-        if segment is None:
+        selected = self._selected_segment()
+        if selected is None:
             return
+        session, segment = selected
         groups = (
             (Severity.ERROR, "Errors"), (Severity.WARNING, "Warnings"),
             (Severity.INFO, "Information"), (Severity.PASSED, "Passed"),
         )
-        html = [f"<h2>Segment {segment.number}</h2>"]
+        html = [
+            f"<h2>{escape(session.root.name)} · Segment {segment.number}</h2>",
+            f"<p>{escape(str(session.root))}</p>",
+        ]
         html.append("<h3>Input files</h3><ul>")
         for video in sorted(segment.videos, key=lambda item: item.camera):
             html.append(
@@ -516,15 +685,19 @@ class MainWindow(QMainWindow):
                     f"{escape(check.message)}{fix}</li>"
                 )
             html.append("</ul>")
-        result = self.results.get(segment.number)
+        result = self.results.get(_result_key(session, segment))
         if result:
             html.append(f"<h3>Output</h3><p>{escape(str(result.output_path))}</p>")
             html.append('<p><a href="reveal://output">Reveal in Explorer</a></p>')
         self.details.setHtml("".join(html))
 
     def _reveal_output(self, _url: QUrl) -> None:
-        segment = self._selected_segment()
-        result = self.results.get(segment.number) if segment else None
+        selected = self._selected_segment()
+        result = (
+            self.results.get(_result_key(*selected))
+            if selected is not None
+            else None
+        )
         if result is None:
             return
         if sys.platform == "win32":
@@ -533,17 +706,21 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path.parent)))
 
     def _copy_report(self) -> None:
-        if self.session is not None:
-            QApplication.clipboard().setText(text_report(self.session))
-            self._update_summary("Validation report copied to clipboard")
+        if self.sessions:
+            report = "\n\n".join(text_report(session).rstrip() for session in self.sessions)
+            QApplication.clipboard().setText(report + "\n")
+            self._update_summary(
+                f"Validation report for {len(self.sessions)} session(s) copied to clipboard"
+            )
 
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
-        if self.session and self.thread is None:
+        if self.sessions and self.thread is None:
             stale = any(
                 segment.validated_fingerprint is not None
-                and segment.validated_fingerprint != segment.fingerprint()
-                for segment in self.session.segments
+                and _requires_validation(segment)
+                for session in self.sessions
+                for segment in session.segments
             )
             if stale:
                 QTimer.singleShot(0, self._start_validation)

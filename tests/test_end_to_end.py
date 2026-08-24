@@ -10,7 +10,10 @@ import pytest
 from mcap.reader import make_reader
 
 from robocap_to_mcap.cli import main
+from robocap_to_mcap.conversion import convert_segment
 from robocap_to_mcap.engine.profile import profile_mcap
+from robocap_to_mcap.scanner import discover_session_roots, scan_session
+from robocap_to_mcap.validator import validate_session_deep
 
 
 def _video(path: Path, color: str) -> None:
@@ -79,3 +82,32 @@ def test_real_session_converts_to_verified_mcap_without_calibration(tmp_path: Pa
         "extrinsics": False,
         "notice": "No device-specific calibration data is included.",
     }
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required")
+def test_bulk_parent_discovers_and_converts_multiple_sessions(tmp_path: Path) -> None:
+    roots = [
+        tmp_path / "75cd2758f7384110_20260720_034459_session6",
+        tmp_path / "8c94d6053f48d3e4_20260721_041500_session7",
+    ]
+    for index, root in enumerate(roots, start=1):
+        root.mkdir()
+        _video(root / "robocap_segment1_video_left_eye.mp4", "red")
+        _video(root / "robocap_segment1_video_right_eye.mp4", "blue")
+        _imu(root / "robocap_segment1_imu_left.db", index * 10 + 1)
+        _imu(root / "robocap_segment1_imu_right.db", index * 10 + 2)
+
+    discovered = discover_session_roots([tmp_path])
+    sessions = [validate_session_deep(scan_session(root)) for root in discovered]
+    results = [
+        convert_segment(session, session.segments[0])
+        for session in sessions
+    ]
+
+    assert discovered == [root.resolve() for root in roots]
+    assert all(result.success for result in results)
+    assert [result.output_path.name for result in results] == [
+        "75cd2758f7384110_20260720_034459_segment1.mcap",
+        "8c94d6053f48d3e4_20260721_041500_segment1.mcap",
+    ]
+    assert all(result.output_path.parent.name == "mcap" for result in results)

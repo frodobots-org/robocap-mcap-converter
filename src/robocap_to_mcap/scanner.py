@@ -42,6 +42,76 @@ EXPECTED_HEAD_CAMERAS = frozenset(_HEAD_DATA_NUMBER)
 EXPECTED_WRIST_CAMERAS = frozenset(_WRIST_DATA_NUMBER)
 
 
+def is_supported_capture_file(path: str | Path) -> bool:
+    """Return whether a path names an input file understood by the converter."""
+    path = Path(path)
+    name = path.name
+    if name.endswith(".normalized.mp4") or name.endswith(".mcap"):
+        return False
+    return any(pattern.match(name) for pattern in (_NEW_VIDEO, _OLD_VIDEO, _NEW_IMU, _OLD_IMU))
+
+
+def _timestamped_ancestor(path: Path, boundary: Path | None = None) -> Path | None:
+    current = path if path.is_dir() else path.parent
+    for candidate in (current, *current.parents):
+        if _SESSION_TIMESTAMP.search(candidate.name):
+            return candidate
+        if boundary is not None and candidate == boundary:
+            break
+    return None
+
+
+def discover_session_roots(paths: list[str | Path]) -> list[Path]:
+    """Discover timestamped recording sessions from folders or dropped files.
+
+    A timestamped session folder is treated as one job. A parent folder is
+    searched recursively and split into independent session jobs.
+    """
+    sessions: set[Path] = set()
+    for raw_path in paths:
+        path = Path(raw_path).expanduser().resolve()
+        if path.is_file():
+            if is_supported_capture_file(path):
+                sessions.add(_timestamped_ancestor(path) or path.parent)
+            continue
+        if not path.is_dir():
+            continue
+        if _SESSION_TIMESTAMP.search(path.name):
+            if any(
+                is_supported_capture_file(item)
+                and "mcap" not in {
+                    part.lower()
+                    for part in item.relative_to(path).parts[:-1]
+                }
+                for item in path.rglob("*")
+                if item.is_file()
+            ):
+                sessions.add(path)
+            continue
+
+        discovered: set[Path] = set()
+        has_ungrouped_input = False
+        for item in path.rglob("*"):
+            if not item.is_file() or not is_supported_capture_file(item):
+                continue
+            try:
+                relative = item.relative_to(path)
+            except ValueError:
+                continue
+            if "mcap" in {part.lower() for part in relative.parts[:-1]}:
+                continue
+            session_root = _timestamped_ancestor(item, path)
+            if session_root is None:
+                has_ungrouped_input = True
+            else:
+                discovered.add(session_root)
+        if discovered:
+            sessions.update(discovered)
+        elif has_ungrouped_input:
+            sessions.add(path)
+    return sorted(sessions, key=lambda item: str(item).lower())
+
+
 def _camera_name(raw: str, rig: str) -> str:
     value = raw.lower()
     if rig == "robocap":

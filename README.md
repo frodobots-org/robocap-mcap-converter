@@ -46,7 +46,7 @@ Each MP4 must contain a numeric `format.tags.comment` value holding its
 ## Docker Quick Start
 
 ```bash
-docker pull bitrobot/robocap-mcap-converter:0.2.1
+docker pull bitrobot/robocap-mcap-converter:0.3.0
 mkdir -p sessions output
 # The container runs as non-root UID/GID 10001.
 sudo chown 10001:10001 output
@@ -54,7 +54,7 @@ sudo chown 10001:10001 output
 docker run --rm \
   -v "$PWD/sessions:/work/sessions:ro" \
   -v "$PWD/output:/work/output" \
-  bitrobot/robocap-mcap-converter:0.2.1 \
+  bitrobot/robocap-mcap-converter:0.3.0 \
   local /work/sessions/75cd2758f7384110_20260720_034459_session6 \
   --output-dir /work/output
 ```
@@ -85,12 +85,21 @@ Outputs are written under `SESSION/mcap/` using:
 <robocap_id>_<YYYYMMDD_HHMMSS>_segment<N>.mcap
 ```
 
+## Windows Bulk Conversion
+
+The desktop app accepts one session folder, multiple session folders, or a
+parent folder containing many timestamped sessions. It discovers every
+session recursively, validates all segments, and processes valid segments as
+one queue. A failed session does not stop the rest of the batch. Each output
+is written to its source session's `mcap` folder using the unique filename
+shown above.
+
 ## S3 Mode
 
 The container uses the standard AWS credential chain. Prefer workload roles:
 
 ```bash
-docker run --rm bitrobot/robocap-mcap-converter:0.2.1 \
+docker run --rm bitrobot/robocap-mcap-converter:0.3.0 \
   s3 \
   --input-uri s3://customer-raw/session/20260720_034459_session6/ \
   --output-uri s3://customer-derived/mcap/job-001/ \

@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from robocap_to_mcap.models import Severity
-from robocap_to_mcap.scanner import normalize_robocap_id, scan_session
+from robocap_to_mcap.scanner import (
+    discover_session_roots,
+    normalize_robocap_id,
+    scan_session,
+)
 
 
 HEAD_CAMERAS = (
@@ -106,3 +110,27 @@ def test_robocap_id_override_is_normalized_and_validated(tmp_path: Path) -> None
         assert "RoboCap ID" in str(exc)
     else:
         raise AssertionError("invalid RoboCap ID was accepted")
+
+
+def test_bulk_discovery_splits_parent_folder_into_sessions(tmp_path: Path) -> None:
+    first = tmp_path / "75cd2758f7384110_20260720_034459_session6"
+    second = tmp_path / "8c94d6053f48d3e4_20260721_041500_session7"
+    for root in (first, second):
+        _touch(root / "robocap_segment1_video_left_eye.mp4")
+        _touch(root / "robocap_segment1_imu_left.db")
+        _touch(root / "robocap_segment1_imu_right.db")
+
+    assert discover_session_roots([tmp_path]) == [first.resolve(), second.resolve()]
+
+
+def test_bulk_discovery_accepts_multiple_sessions_and_ignores_outputs(tmp_path: Path) -> None:
+    first = tmp_path / "75cd2758f7384110_20260720_034459_session6"
+    second = tmp_path / "8c94d6053f48d3e4_20260721_041500_session7"
+    _touch(first / "robocap_segment1_video_left_eye.mp4")
+    _touch(second / "robocap_segment2_video_right_eye.mp4")
+    _touch(second / "mcap" / "robocap_segment99_video_left_eye.mp4")
+
+    assert discover_session_roots([second, first, first]) == [
+        first.resolve(),
+        second.resolve(),
+    ]

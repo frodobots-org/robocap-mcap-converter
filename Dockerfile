@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:0.8.17 AS uv
 
 FROM python:3.12-slim-bookworm
 
-ARG VERSION=0.2.1
+ARG VERSION=0.3.0
 ARG REVISION=unknown
 
 LABEL org.opencontainers.image.title="RoboCap MCAP Converter" \
