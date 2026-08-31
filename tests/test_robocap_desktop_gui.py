@@ -185,3 +185,46 @@ def test_bulk_conversion_continues_after_one_job_raises(
     assert len(emitted[0]) == 2
     assert emitted[0][0][1].success is False
     assert emitted[0][1][1].success is True
+
+
+def test_large_bulk_validation_enables_and_queues_conversion_without_table_rebuild(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions = [
+        SessionInput(
+            root=tmp_path / f"device{i:02d}_20260801_010203_session{i}",
+            session_start=None,
+            segments=[SegmentInput(number=1)],
+        )
+        for i in range(90)
+    ]
+    window = MainWindow()
+    window.sessions = sessions
+    window._refresh_table()
+    window.operation = "validation"
+    window.thread = object()  # type: ignore[assignment]
+
+    refresh_calls = 0
+
+    def count_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    monkeypatch.setattr(window, "_refresh_table", count_refresh)
+    first = sessions[0].segments[0]
+    first.validated_fingerprint = ()
+    window._validation_progress(sessions[0], 1, 1, 90)
+
+    assert refresh_calls == 0
+    assert window.table.item(0, 5).text() == "Ready"
+    assert window.convert_button.isEnabled()
+
+    window._start_conversion()
+
+    assert window.conversion_requested is True
+    assert not window.convert_button.isEnabled()
+    assert "Conversion queued" in window.summary.text()
+    window.thread = None
+    window.close()

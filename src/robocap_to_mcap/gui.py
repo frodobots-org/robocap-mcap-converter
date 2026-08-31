@@ -229,8 +229,11 @@ class MainWindow(QMainWindow):
         self.sessions: list[SessionInput] = []
         self.results: dict[tuple[str, int], ConversionResult] = {}
         self.row_inputs: dict[tuple[str, int], tuple[SessionInput, SegmentInput]] = {}
+        self.row_indices: dict[tuple[str, int], int] = {}
         self.thread: QThread | None = None
         self.worker: QObject | None = None
+        self.operation: str | None = None
+        self.conversion_requested = False
         self.cancel_event = threading.Event()
         self.deep_on_drop = True
         self.debug_mode = False
@@ -387,6 +390,7 @@ class MainWindow(QMainWindow):
 
         self.sessions = sessions
         self.results.clear()
+        self.conversion_requested = False
         self.recheck_button.setEnabled(True)
         self.copy_button.setEnabled(self.debug_mode)
         self._refresh_table()
@@ -451,11 +455,13 @@ class MainWindow(QMainWindow):
             for segment in session.segments
         ]
         self.row_inputs.clear()
+        self.row_indices.clear()
         self.table.setRowCount(len(rows))
         selected_row = None
         for row, (session, segment) in enumerate(rows):
             key = _result_key(session, segment)
             self.row_inputs[key] = (session, segment)
+            self.row_indices[key] = row
             result = self.results.get(key)
             duration = (
                 f"{segment.duration_seconds:.1f}s"
@@ -486,6 +492,7 @@ class MainWindow(QMainWindow):
     def _start_validation(self) -> None:
         if not self.sessions or self.thread is not None:
             return
+        self.operation = "validation"
         self.cancel_event = threading.Event()
         total = sum(len(session.segments) for session in self.sessions)
         self.progress.setRange(0, total)
@@ -512,13 +519,14 @@ class MainWindow(QMainWindow):
 
     def _validation_progress(
         self,
-        _session: SessionInput,
-        _number: int,
+        session: SessionInput,
+        number: int,
         completed: int,
         total: int,
     ) -> None:
         self.progress.setValue(completed)
-        self._refresh_table()
+        self._update_table_row(session, number)
+        self._update_buttons()
         self._update_summary(f"Validated {completed} of {total} segments")
 
     def _validation_finished(self, _sessions: list[SessionInput]) -> None:
@@ -532,7 +540,15 @@ class MainWindow(QMainWindow):
         )
 
     def _start_conversion(self) -> None:
-        if not self.sessions or self.thread is not None:
+        if not self.sessions:
+            return
+        if self.thread is not None:
+            if self.operation == "validation" and self._ready_jobs():
+                self.conversion_requested = True
+                self._update_summary(
+                    "Conversion queued; finishing validation before converting ready segments..."
+                )
+                self._update_buttons()
             return
         candidates = [
             segment
@@ -542,16 +558,17 @@ class MainWindow(QMainWindow):
             if not segment.errors
         ]
         if any(_requires_validation(segment) for segment in candidates):
+            self.conversion_requested = True
             self._start_validation()
             return
-        jobs = [
-            (session, segment)
-            for session in self.sessions
-            for segment in session.segments
-            if segment.is_ready
-        ]
+        jobs = self._ready_jobs()
         if not jobs:
+            self.conversion_requested = False
+            self._update_summary("No segments are ready to convert")
+            self._update_buttons()
             return
+        self.operation = "conversion"
+        self.conversion_requested = False
         os.environ["ROBOCAP_CONVERT_VIDEO_WORKERS"] = str(self.video_workers)
         self.cancel_event = threading.Event()
         self.progress.setRange(0, len(jobs))
@@ -585,7 +602,7 @@ class MainWindow(QMainWindow):
         session, result = payload
         self.results[_result_key(session, result.segment)] = result
         self.progress.setValue(current)
-        self._refresh_table()
+        self._update_table_row(session, result.segment)
         self._update_summary(f"Converted {current} of {total} segments")
 
     def _conversion_finished(
@@ -609,11 +626,17 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
 
     def _thread_finished(self) -> None:
+        completed_operation = self.operation
         self.thread = None
         self.worker = None
+        self.operation = None
+        if completed_operation == "validation" and self.conversion_requested:
+            QTimer.singleShot(0, self._start_conversion)
+            return
         self._update_buttons()
 
     def _worker_failed(self, message: str) -> None:
+        self.conversion_requested = False
         self._set_busy(False, "Operation failed")
         if self.debug_mode:
             body = message
@@ -632,14 +655,52 @@ class MainWindow(QMainWindow):
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        convertible = any(
-            segment.is_ready or not segment.errors
+        ready = bool(self._ready_jobs())
+        potentially_convertible = any(
+            not segment.errors
             for session in self.sessions
             if not session.has_session_error
             for segment in session.segments
         )
-        self.convert_button.setEnabled(convertible and self.thread is None)
+        if self.operation == "validation":
+            enabled = ready and not self.conversion_requested
+        else:
+            enabled = self.thread is None and potentially_convertible
+        self.convert_button.setEnabled(enabled)
         self.copy_button.setEnabled(self.debug_mode and bool(self.sessions))
+
+    def _ready_jobs(self) -> list[tuple[SessionInput, SegmentInput]]:
+        return [
+            (session, segment)
+            for session in self.sessions
+            if not session.has_session_error
+            for segment in session.segments
+            if segment.is_ready
+        ]
+
+    def _update_table_row(self, session: SessionInput, number: int) -> None:
+        key = _result_key(session, number)
+        row = self.row_indices.get(key)
+        selected = self.row_inputs.get(key)
+        if row is None or selected is None:
+            return
+        _session, segment = selected
+        result = self.results.get(key)
+        values = {
+            2: str(len(segment.videos)),
+            3: str(len(segment.imus)),
+            4: (
+                f"{segment.duration_seconds:.1f}s"
+                if segment.duration_seconds is not None
+                else "Checking..."
+            ),
+            5: _display_status(segment, result),
+            6: str(result.output_path) if result else "",
+        }
+        for column, value in values.items():
+            item = self.table.item(row, column)
+            if item is not None:
+                item.setText(value)
 
     def _update_summary(self, message: str) -> None:
         self.summary.setText(message)

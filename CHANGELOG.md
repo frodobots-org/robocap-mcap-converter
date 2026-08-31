@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 - 2026-08-31
+
+- Fixed the disabled Convert button during large multi-session validation.
+- Queued conversion when clicked while remaining sessions are still validating.
+- Removed full-table rebuilds after every validated segment to keep 30-90
+  session batches responsive.
+- Added a 90-session GUI regression test.
+
 ## 0.3.0 - 2026-08-24
 
 - Added bulk conversion to the Windows app.
