@@ -1,0 +1,43 @@
+name: macOS desktop build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install FFmpeg
+        run: |
+          brew install ffmpeg
+          echo "ROBOCAP_FFMPEG_DIR=$(brew --prefix ffmpeg)/bin" >> "$GITHUB_ENV"
+
+      - name: Build, test, and ad-hoc sign
+        run: bash packaging/macos/build.sh
+
+      - name: Record runner architecture
+        run: |
+          uname -a
+          file dist/RoboCapToMCAP.app/Contents/MacOS/RoboCapToMCAP
+          find dist/RoboCapToMCAP.app/Contents -type f -path '*/ffmpeg/bin/*' -exec file {} \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoboCapToMCAP-macos-unsigned
+          path: |
+            dist/RoboCapToMCAP-*-macos-*-unsigned.dmg
+            dist/RoboCapToMCAP-*-macos-*-unsigned.dmg.sha256
+          if-no-files-found: error

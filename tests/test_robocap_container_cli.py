@@ -1,4 +1,4 @@
-from robocap_to_mcap import container_cli
+from robocap_to_mcap import __version__, container_cli
 
 
 def test_container_cli_dispatches_local(monkeypatch):
@@ -13,7 +13,7 @@ def test_container_cli_dispatches_s3(monkeypatch):
 
 def test_container_cli_version(capsys):
     assert container_cli.main(["version"]) == 0
-    assert capsys.readouterr().out.strip() == "0.3.0"
+    assert capsys.readouterr().out.strip() == __version__ == "0.4.0"
 
 
 def test_container_cli_rejects_unknown_command(capsys):

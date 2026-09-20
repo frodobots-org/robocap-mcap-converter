@@ -19,7 +19,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: converter
-          image: REGISTRY/robocap-mcap-converter:0.3.1
+          image: REGISTRY/robocap-mcap-converter:0.4.0
           args:
             - s3
             - --input-uri

@@ -1,5 +1,5 @@
 #define MyAppName "RoboCap to MCAP"
-#define MyAppVersion "0.3.1"
+#define MyAppVersion "0.4.0"
 #define MyAppPublisher "BitRobot"
 #define MyAppExeName "RoboCapToMCAP.exe"
 

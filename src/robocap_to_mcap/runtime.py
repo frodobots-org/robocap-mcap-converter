@@ -13,9 +13,12 @@ def application_root() -> Path:
 
 def configure_bundled_tools() -> None:
     """Put packaged ffmpeg/ffprobe ahead of the machine PATH."""
+    app_root = application_root()
     roots = [
-        application_root() / "ffmpeg" / "bin",
-        application_root() / "_internal" / "ffmpeg" / "bin",
+        app_root / "ffmpeg" / "bin",
+        app_root / "_internal" / "ffmpeg" / "bin",
+        app_root.parent / "Frameworks" / "ffmpeg" / "bin",
+        app_root.parent / "Resources" / "ffmpeg" / "bin",
     ]
     for root in roots:
         if (root / "ffmpeg.exe").exists() or (root / "ffmpeg").exists():

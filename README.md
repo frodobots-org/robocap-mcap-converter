@@ -17,7 +17,7 @@ MCAP per segment.
 - Automatic B-frame and incompatible SPS normalization
 - IMU conversion to SI units with gyro interpolation
 - Automatic structural, timing, and post-write MCAP validation
-- Windows drag-and-drop app, local CLI, Docker, S3, AWS Batch, and Kubernetes
+- Windows and macOS drag-and-drop apps, local CLI, Docker, S3, AWS Batch, and Kubernetes
 - No database, FrodoBots service, telemetry, or inbound network listener
 
 ## Input Layout
@@ -46,7 +46,7 @@ Each MP4 must contain a numeric `format.tags.comment` value holding its
 ## Docker Quick Start
 
 ```bash
-docker pull bitrobot/robocap-mcap-converter:0.3.1
+docker pull bitrobot/robocap-mcap-converter:0.4.0
 mkdir -p sessions output
 # The container runs as non-root UID/GID 10001.
 sudo chown 10001:10001 output
@@ -54,7 +54,7 @@ sudo chown 10001:10001 output
 docker run --rm \
   -v "$PWD/sessions:/work/sessions:ro" \
   -v "$PWD/output:/work/output" \
-  bitrobot/robocap-mcap-converter:0.3.1 \
+  bitrobot/robocap-mcap-converter:0.4.0 \
   local /work/sessions/75cd2758f7384110_20260720_034459_session6 \
   --output-dir /work/output
 ```
@@ -85,7 +85,7 @@ Outputs are written under `SESSION/mcap/` using:
 <robocap_id>_<YYYYMMDD_HHMMSS>_segment<N>.mcap
 ```
 
-## Windows Bulk Conversion
+## Desktop Bulk Conversion
 
 The desktop app accepts one session folder, multiple session folders, or a
 parent folder containing many timestamped sessions. It discovers every
@@ -94,12 +94,23 @@ one queue. A failed session does not stop the rest of the batch. Each output
 is written to its source session's `mcap` folder using the unique filename
 shown above.
 
+### macOS
+
+Download the macOS DMG from the GitHub release, open it, and drag
+**RoboCap to MCAP** into **Applications**. The app supports the same single
+session, multiple-session, and parent-folder bulk conversion flow as Windows.
+
+The initial macOS package is ad-hoc signed but not Apple-notarized. On first
+launch, Control-click the app in Applications, choose **Open**, then confirm
+**Open**. A notarized build requires an organizational Apple Developer ID
+certificate and notarization credentials in the release workflow.
+
 ## S3 Mode
 
 The container uses the standard AWS credential chain. Prefer workload roles:
 
 ```bash
-docker run --rm bitrobot/robocap-mcap-converter:0.3.1 \
+docker run --rm bitrobot/robocap-mcap-converter:0.4.0 \
   s3 \
   --input-uri s3://customer-raw/session/20260720_034459_session6/ \
   --output-uri s3://customer-derived/mcap/job-001/ \

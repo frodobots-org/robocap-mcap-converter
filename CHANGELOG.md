@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - 2026-09-20
+
+- Added a macOS desktop application built from the same conversion and
+  validation engine as the Windows app.
+- Added a macOS DMG build with bundled FFmpeg and FFprobe.
+- Added ad-hoc code-signing, bundle validation, packaged-tool smoke tests, and
+  a macOS GitHub Actions build.
+- Added macOS application-bundle tool discovery and Finder reveal behavior.
+- Preserved single-session and bulk parent-folder conversion behavior across
+  Windows and macOS.
+
 ## 0.3.1 - 2026-08-31
 
 - Fixed the disabled Convert button during large multi-session validation.

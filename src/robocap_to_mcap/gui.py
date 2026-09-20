@@ -749,7 +749,12 @@ class MainWindow(QMainWindow):
         result = self.results.get(_result_key(session, segment))
         if result:
             html.append(f"<h3>Output</h3><p>{escape(str(result.output_path))}</p>")
-            html.append('<p><a href="reveal://output">Reveal in Explorer</a></p>')
+            reveal_label = (
+                "Reveal in Finder"
+                if sys.platform == "darwin"
+                else "Reveal in Explorer"
+            )
+            html.append(f'<p><a href="reveal://output">{reveal_label}</a></p>')
         self.details.setHtml("".join(html))
 
     def _reveal_output(self, _url: QUrl) -> None:
