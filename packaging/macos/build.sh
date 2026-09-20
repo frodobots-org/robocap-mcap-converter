@@ -76,5 +76,5 @@ hdiutil create -volname "RoboCap to MCAP ${VERSION}" \
   -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG"
 rm -rf "$DMG_ROOT"
 
-shasum -a 256 "$DMG" | tee "$DMG.sha256"
+(cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")") | tee "$DMG.sha256"
 echo "Built $DMG"

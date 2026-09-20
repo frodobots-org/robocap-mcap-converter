@@ -11,7 +11,16 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +45,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: RoboCapToMCAP-macos-unsigned
+          name: RoboCapToMCAP-macos-${{ matrix.arch }}-unsigned
           path: |
             dist/RoboCapToMCAP-*-macos-*-unsigned.dmg
             dist/RoboCapToMCAP-*-macos-*-unsigned.dmg.sha256

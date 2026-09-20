@@ -96,9 +96,11 @@ shown above.
 
 ### macOS
 
-Download the macOS DMG from the GitHub release, open it, and drag
-**RoboCap to MCAP** into **Applications**. The app supports the same single
-session, multiple-session, and parent-folder bulk conversion flow as Windows.
+Download the DMG for the Mac's architecture (`arm64` for Apple Silicon or
+`x86_64` for Intel), open it, and drag **RoboCap to MCAP** into
+**Applications**. Both packages bundle native `ffmpeg` and `ffprobe` and
+support the same single-session, multiple-session, and parent-folder bulk
+conversion flow as Windows.
 
 The initial macOS package is ad-hoc signed but not Apple-notarized. On first
 launch, Control-click the app in Applications, choose **Open**, then confirm
